@@ -827,6 +827,42 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   setSelection([]);
 });
 
+// ---- Вращение вокруг вертикальной оси через точку под курсором (ЛКМ) ----
+controls.mouseButtons.LEFT = null;
+const orb = { on: false, px: 0, py: 0, pivot: new THREE.Vector3() };
+const UPV = new THREE.Vector3(0, 1, 0);
+function rotAround(v, pivot, axis, a) { v.sub(pivot).applyAxisAngle(axis, a).add(pivot); }
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || e.pointerType === 'touch') return;
+  const r = renderer.domElement.getBoundingClientRect();
+  pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(meshes.filter((m) => m.visible && m.parent && m.parent.visible), false);
+  orb.pivot.copy(hits.length ? hits[0].point : controls.target);
+  orb.on = true; orb.px = e.clientX; orb.py = e.clientY;
+  renderer.domElement.setPointerCapture(e.pointerId);
+});
+renderer.domElement.addEventListener('pointerup', () => {
+  if (!orb.on) return;
+  orb.on = false;
+  controls.dispatchEvent({ type: 'end' });
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (!orb.on) return;
+  const dx = e.clientX - orb.px, dy = e.clientY - orb.py;
+  orb.px = e.clientX; orb.py = e.clientY;
+  const k = 2 * Math.PI / renderer.domElement.clientHeight;
+  rotAround(camera.position, orb.pivot, UPV, -dx * k);
+  rotAround(controls.target, orb.pivot, UPV, -dx * k);
+  const off = camera.position.clone().sub(controls.target);
+  const right = new THREE.Vector3().crossVectors(off, UPV).normalize();
+  const pol = Math.acos(off.y / off.length());
+  const da = Math.min(Math.max(pol - dy * k, 0.05), Math.PI - 0.05) - pol;
+  rotAround(camera.position, orb.pivot, right, -da);
+  rotAround(controls.target, orb.pivot, right, -da);
+  controls.update();
+});
+
 // ---- UI wiring ----
 $('viewbar').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-view]');
@@ -1308,6 +1344,7 @@ const SECTION = (() => {
         slider.step = 0.01;
         state.pos = axisMid(axis);
         slider.value = state.pos;
+        const fine = $('secPosFine'); if (fine) fine.value = 0;
         const val = $('secPosVal');
         if (val) val.textContent = fmt(state.pos);
       }
@@ -1406,15 +1443,28 @@ const SECTION = (() => {
     posVal.className = 'val num';
     posVal.id = 'secPosVal';
     posVal.textContent = fmt(state.pos);
-    posSlider.addEventListener('input', () => {
-      state.pos = parseFloat(posSlider.value);
+    const fineSlider = document.createElement('input');
+    fineSlider.type = 'range';
+    fineSlider.id = 'secPosFine';
+    fineSlider.min = -0.5; fineSlider.max = 0.5; fineSlider.step = 0.002; fineSlider.value = 0;
+    const upd = () => {
+      state.pos = parseFloat(posSlider.value) + parseFloat(fineSlider.value);
       posVal.textContent = fmt(state.pos);
       apply();
-    });
+    };
+    posSlider.addEventListener('input', upd);
+    fineSlider.addEventListener('input', upd);
     posRow.appendChild(posLabel);
     posRow.appendChild(posSlider);
     posRow.appendChild(posVal);
     planeBlock.appendChild(posRow);
+    const fineRow = document.createElement('div');
+    fineRow.className = 'control';
+    const fineLabel = document.createElement('label');
+    fineLabel.textContent = 'Точно ±0,5 м';
+    fineRow.appendChild(fineLabel);
+    fineRow.appendChild(fineSlider);
+    planeBlock.appendChild(fineRow);
 
     const flipRow = document.createElement('div');
     flipRow.className = 'control';
